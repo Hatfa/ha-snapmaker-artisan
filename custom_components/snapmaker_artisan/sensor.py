@@ -287,6 +287,19 @@ SENSOR_DESCRIPTIONS: tuple[SnapmakerSensorDescription, ...] = (
         ),
         entity_registry_enabled_default=True,
     ),
+    # UNCONFIRMED -- see decode_enclosure()'s docstring in sacp.py. Best
+    # candidate for light power, but never isolated by actually toggling
+    # the light during testing. Treat with real skepticism.
+    SnapmakerSensorDescription(
+        key="enclosure_light",
+        name="Enclosure Light (unconfirmed)",
+        icon="mdi:lightbulb-question-outline",
+        subscription_key="enclosure",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=_enclosure("light_percent_unconfirmed"),
+        entity_registry_enabled_default=True,
+    ),
 )
 
 

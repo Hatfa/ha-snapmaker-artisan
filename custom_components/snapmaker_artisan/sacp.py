@@ -1,12 +1,12 @@
 """SACP protocol helpers for talking to a Snapmaker Artisan.
 
 Packet framing (make_packet/read_packet) and the checksum functions are
-verified byte-for-byte against the reference Go implementation
-(macdylan/sm2uploader). Subscription targets (heartbeat 0x01/0xA0, fan
-0x10/0xA3, elapsed time 0xAC/0xA5, print line 0xAC/0xA0, extruders
-0x10/0xA0, bed 0x14/0xA0, enclosure 0x15/0xA0) and their decoders were
-confirmed against real packet captures and/or live correlated testing
-(toggling things on the touchscreen and watching which bytes moved).
+verified byte-for-byte against real packet captures. Subscription
+targets (heartbeat 0x01/0xA0, fan 0x10/0xA3, elapsed time 0xAC/0xA5,
+print line 0xAC/0xA0, extruders 0x10/0xA0, bed 0x14/0xA0, enclosure
+0x15/0xA0) and their decoders were confirmed against real packet
+captures and/or live correlated testing (toggling things on the
+touchscreen and watching which bytes moved).
 
 Position (0x01/0x30) is NOT a subscription -- the subscribe wrapper is
 CONFIRMED REJECTED on both receiver=1 and receiver=2. Instead it's a
@@ -14,9 +14,9 @@ direct-addressed one-shot query (command_set/command_id ARE 0x01/0x30,
 not wrapped in 0x01/0x00) that must be re-sent on a timer. CONFIRMED
 WORKING -- returns real X/Y/Z and a homed flag.
 
-Device info (0x01/0x20) is also a direct one-shot query, ported from
-matze19999/SnapmakerSACP-Python and confirmed working. Module 1024's
-firmware blob decodes into a table of submodules.
+Device info (0x01/0x20) is also a direct one-shot query, confirmed
+working. Module 1024's firmware blob decodes into a table of
+submodules.
 
 Enclosure (0x15/0xA0) byte mapping confirmed via live testing on
 2026-10-04: see decode_enclosure().
@@ -115,8 +115,11 @@ async def read_packet(reader: asyncio.StreamReader) -> dict[str, Any]:
     }
 
 
+CLIENT_NAME = b"Home Assistant"
+
+
 async def handshake(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, timeout: float) -> None:
-    payload = struct.pack("<H", 11) + b"sm2uploader" + struct.pack("<HH", 0, 0)
+    payload = struct.pack("<H", len(CLIENT_NAME)) + CLIENT_NAME + struct.pack("<HH", 0, 0)
     writer.write(make_packet(receiver=2, sender=0, attribute=0, sequence=1,
                               command_set=0x01, command_id=0x05, payload=payload))
     await writer.drain()
@@ -165,8 +168,7 @@ def make_disconnect_packet() -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Device info -- one-shot direct query (0x01/0x20). Ported from
-# matze19999/SnapmakerSACP-Python. Confirmed working.
+# Device info -- one-shot direct query (0x01/0x20). Confirmed working.
 # ---------------------------------------------------------------------------
 
 def make_module_info_query_packet(sequence: int) -> bytes:
@@ -367,8 +369,14 @@ def decode_enclosure(data: bytes):
       byte[10] = door-detection enabled for CNC jobs (0/1)
       byte[11] = door open (0=closed, 1=open)
       byte[12] = enclosure fan speed, 0-100
+    byte[3] is UNCONFIRMED -- it's a plausible candidate for light
+    power (it's always 0x64/100, a sensible default-on value) but it
+    was never isolated by actually toggling the light during testing,
+    unlike the fields above. Exposed anyway since it's the best
+    candidate available; treat it with real skepticism until someone
+    toggles the light specifically and confirms it moves.
     byte[1] looks like a boot/session counter (unconfirmed). The rest
-    (bytes[2:6], [7:10] apart from the two flags above) are still
+    (bytes[2], [4:6], [7:10] apart from the two flags above) are still
     unknown -- not guessing further than this.
     """
     if len(data) < 13:
@@ -378,6 +386,7 @@ def decode_enclosure(data: bytes):
         "fan_percent": data[12],
         "door_detect_3dp": bool(data[6]),
         "door_detect_cnc": bool(data[10]),
+        "light_percent_unconfirmed": data[3],
     }
 
 
